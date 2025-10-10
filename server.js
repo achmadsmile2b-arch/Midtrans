@@ -94,9 +94,15 @@ try {
   );
 
   const legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
-  if (!legacyId) {
-    throw new Error("Legacy ID tidak ditemukan di GraphQL response");
-  }
+let finalOrderId;
+if (legacyId) {
+  finalOrderId = legacyId;
+  console.log("🧩 Legacy REST ID ditemukan:", finalOrderId);
+} else {
+  // fallback: gunakan ID dari webhook langsung (angka murni)
+  finalOrderId = cleanOrderId;
+  console.warn("⚠️ Legacy ID tidak ditemukan, gunakan ID webhook:", finalOrderId);
+}
 
   console.log("🧩 Legacy REST ID ditemukan:", legacyId);
 
@@ -109,7 +115,7 @@ try {
   };
 
   // Langkah 3: Update catatan via REST API
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${legacyId}.json`;
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${finalOrderId}.json`;
 
   await axios.put(shopifyUrl, updateNote, {
     headers: {
