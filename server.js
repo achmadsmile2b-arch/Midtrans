@@ -7,16 +7,16 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// 🏷️ Ganti dengan LIVE Server Key Midtrans kamu
-const MIDTRANS_SERVER_KEY = "Mid-server-XXXXXXXXXXXX"; // <- GANTI
+// 🏷️ Ganti dengan Server Key LIVE dari Midtrans
+const MIDTRANS_SERVER_KEY = "Mid-server-XXXXXXXXXXXXXXXXXXXXX"; // GANTI ini
 const MIDTRANS_API_URL = "https://app.midtrans.com/snap/v1/transactions";
 
-// ✅ Root route (biar tidak muncul “Cannot GET /”)
+// ✅ Root route
 app.get("/", (req, res) => {
-  res.send("🚀 Midtrans x Shopify API is running successfully!");
+  res.send("🚀 Midtrans x Shopify Integration API is running successfully!");
 });
 
-// 🧾 Endpoint untuk buat transaksi Snap
+// 🧾 CREATE TRANSACTION - dipanggil dari Shopify (tombol Bayar via Midtrans)
 app.post("/create-transaction", async (req, res) => {
   try {
     const { amount, customer, order_id } = req.body;
@@ -53,19 +53,92 @@ app.post("/create-transaction", async (req, res) => {
   }
 });
 
-// 🔔 Webhook Notifikasi Midtrans
-app.post("/webhook", (req, res) => {
+// 🔔 WEBHOOK - Midtrans kirim notifikasi ke sini setelah pembayaran
+app.post("/webhook", async (req, res) => {
   try {
     const notification = req.body;
     console.log("🔔 Webhook diterima dari Midtrans:");
     console.log(JSON.stringify(notification, null, 2));
 
-    // Kamu bisa tambahkan logic update order Shopify di sini
-    // contoh: kirim PATCH ke API Shopify untuk ubah status pesanan
+    const { order_id, transaction_status, fraud_status } = notification;
+
+    // Tentukan status Shopify
+    let shopifyStatus = "pending";
+
+    if (transaction_status === "settlement" && fraud_status === "accept") {
+      shopifyStatus = "paid";
+    } else if (transaction_status === "pending") {
+      shopifyStatus = "pending";
+    } else if (
+      transaction_status === "deny" ||
+      transaction_status === "cancel" ||
+      transaction_status === "expire"
+    ) {
+      shopifyStatus = "voided";
+    }
+
+    // 🔐 Ambil credential Shopify dari environment Render
+    const storeUrl = process.env.SHOPIFY_STORE_URL;
+    const token = process.env.SHOPIFY_ADMIN_TOKEN;
+
+    if (!storeUrl || !token) {
+      console.error("❌ Shopify credentials not set in environment.");
+      return res.status(400).send("Missing Shopify credentials");
+    }
+
+    // Endpoint update order di Shopify
+    const apiUrl = `${storeUrl}/admin/api/2024-10/orders/${order_id}.json`;
+
+    console.log(`📦 Update ke Shopify: ${apiUrl}`);
+
+    // 🔁 Update status pembayaran
+    await axios.put(
+      apiUrl,
+      {
+        order: {
+          id: order_id,
+          financial_status: shopifyStatus,
+          note: `💳 Updated by Midtrans webhook: ${transaction_status}`,
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token,
+        },
+      }
+    );
+
+    console.log(`✅ Shopify order ${order_id} diupdate ke status: ${shopifyStatus}`);
+
+    // 🧾 Jika pembayaran sukses → auto-fulfillment
+    if (shopifyStatus === "paid") {
+      const location_id = 123456789; // GANTI dengan location ID dari Shopify kamu
+
+      const fulfillmentRes = await axios.post(
+        `${storeUrl}/admin/api/2024-10/orders/${order_id}/fulfillments.json`,
+        {
+          fulfillment: {
+            location_id,
+            tracking_number: "",
+            notify_customer: true,
+          },
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": token,
+          },
+        }
+      );
+
+      console.log(`📦 Order ${order_id} berhasil di-mark Fulfilled`);
+      console.log("Fulfillment:", fulfillmentRes.data);
+    }
 
     res.status(200).send("OK");
   } catch (error) {
-    console.error("❌ Webhook Error:", error.message);
+    console.error("❌ Webhook Error:", error.response?.data || error.message);
     res.status(500).send("Webhook processing failed");
   }
 });
