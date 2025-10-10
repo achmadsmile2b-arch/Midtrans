@@ -58,6 +58,30 @@ app.post("/webhook", async (req, res) => {
 
     const redirectUrl = response.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
+    // ======== Update catatan pesanan di Shopify ========
+try {
+  const updateNote = {
+    order: {
+      id: orderId,
+      note: `🔗 Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
+    },
+  };
+
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${orderId}.json`;
+  await axios.put(shopifyUrl, updateNote, {
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+    },
+  });
+
+  console.log("📝 Catatan order Shopify diperbarui dengan link Midtrans");
+} catch (e) {
+  console.error(
+    "❌ Gagal memperbarui catatan order Shopify:",
+    e.response?.data || e.message
+  );
+}
 
     // 📝 (opsional) kirim balasan ke Shopify webhook
     res.status(200).json({
