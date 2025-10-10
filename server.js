@@ -134,8 +134,10 @@ app.post("/webhook", async (req, res) => {
 
     res.status(200).send("OK");
   } catch (error) {
-    console.error("❌ Webhook Error:", error.response?.data || error.message);
-    res.status(500).send("Webhook processing failed");
+  console.error("❌ Webhook Error:", error.response?.data || error.message);
+  // tetap kirim 200 agar Midtrans anggap sukses
+  res.status(200).send("OK");
+}
   }
 });
 
