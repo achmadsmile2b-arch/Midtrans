@@ -1,127 +1,105 @@
 import express from "express";
 import axios from "axios";
+import crypto from "crypto";
 import bodyParser from "body-parser";
 import cors from "cors";
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-// ✅ ENV
+// === Environment Variable (Render otomatis inject) ===
 const {
   SHOPIFY_STORE_URL,
   SHOPIFY_ADMIN_TOKEN,
-  SHOPIFY_LOCATION_ID,
   MIDTRANS_SERVER_KEY,
   MIDTRANS_API_URL,
-  PORT = 10000,
+  PORT
 } = process.env;
 
-// ✅ Root check
-app.get("/", (req, res) => {
-  res.send("Midtrans-Webhook-Server aktif 🚀");
-});
+// === Fungsi utilitas ===
+const shopifyHeaders = {
+  "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+  "Content-Type": "application/json",
+};
 
-// ✅ WEBHOOK (dari Midtrans)
-app.post("/webhook", async (req, res) => {
+// === Endpoint utama buat Midtrans checkout ===
+app.post("/midtrans/create", async (req, res) => {
   try {
-    console.log("⚡ Webhook diterima dari Midtrans:");
-    console.log(req.body);
+    const { order_id, gross_amount, customer } = req.body;
 
-    const data = req.body;
-    const order_id = data.order_id;
-    const status = data.transaction_status;
-    const gross_amount = data.gross_amount;
-
-    if (!order_id) {
-      console.log("⚠️ Tidak ada order_id dalam webhook, abaikan.");
-      return res.status(200).send("OK");
-    }
-
-    console.log(`🧾 Order ${order_id}, Status: ${status}, Jumlah: ${gross_amount}`);
-
-    // ✅ Update order di Shopify (jika settlement)
-    if (status === "settlement") {
-      const url = `${SHOPIFY_STORE_URL}/admin/api/2024-10/orders/${order_id}/transactions.json`;
-      await axios.post(
-        url,
-        {
-          transaction: {
-            kind: "sale",
-            status: "success",
-            amount: gross_amount,
-          },
-        },
-        {
-          headers: {
-            "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      console.log(`✅ Order ${order_id} diupdate jadi Paid di Shopify`);
-    }
-
-    res.status(200).send("OK");
-  } catch (error) {
-    console.error("❌ Webhook Error:", error.response?.data || error.message);
-    res.status(200).send("OK"); // tetap kirim OK biar Midtrans anggap sukses
-  }
-});
-
-// ✅ FITUR LINK PEMBAYARAN DARI EMAIL / MANUAL
-app.get("/pay/:order_id", async (req, res) => {
-  try {
-    const order_id = req.params.order_id;
-    console.log(`🧩 Permintaan pembayaran dari email untuk Order ${order_id}`);
-
-    // 🔹 Ambil detail order dari Shopify
-    const orderRes = await axios.get(
-      `${SHOPIFY_STORE_URL}/admin/api/2024-10/orders/${order_id}.json`,
-      {
-        headers: {
-          "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    const order = orderRes.data.order;
-    const amount = parseInt(order.total_price);
-    const customer = {
-      first_name: order.customer?.first_name || "Customer",
-      email: order.customer?.email || "noemail@unknown.com",
+    // Buat transaksi di Midtrans
+    const payload = {
+      transaction_details: {
+        order_id,
+        gross_amount,
+      },
+      customer_details: {
+        first_name: customer.first_name,
+        email: customer.email,
+        phone: customer.phone,
+      },
+      enabled_payments: ["bank_transfer", "qris", "gopay", "credit_card"],
     };
 
-    // 🔹 Buat transaksi Midtrans
-    const midtransRes = await axios.post(
-      MIDTRANS_API_URL,
-      {
-        transaction_details: {
-          order_id,
-          gross_amount: amount,
-        },
-        customer_details: customer,
-        credit_card: { secure: true },
+    const midtransRes = await axios.post(MIDTRANS_API_URL, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Basic ${Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64")}`,
       },
+    });
+
+    const redirectUrl = midtransRes.data.redirect_url;
+
+    console.log("✅ Midtrans redirect URL:", redirectUrl);
+
+    // === Simpan link ke Shopify Order Note ===
+    const orderUpdateUrl = `${SHOPIFY_STORE_URL}/admin/api/2023-10/orders/${order_id}.json`;
+    await axios.put(
+      orderUpdateUrl,
       {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+        order: {
+          id: order_id,
+          note: redirectUrl, // simpan link Midtrans ke note
         },
-      }
+      },
+      { headers: shopifyHeaders }
     );
 
-    const snapUrl = midtransRes.data.redirect_url;
-    console.log(`💳 Redirect ke Midtrans Snap: ${snapUrl}`);
-    res.redirect(snapUrl);
-  } catch (error) {
-    console.error("❌ Error saat buat link Midtrans:", error.response?.data || error.message);
-    res.status(500).send("Gagal membuat link pembayaran");
+    console.log("✅ Link Midtrans berhasil disimpan di note order Shopify.");
+
+    res.json({
+      success: true,
+      redirectUrl,
+    });
+  } catch (err) {
+    console.error("❌ Gagal membuat transaksi Midtrans:", err.response?.data || err.message);
+    res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+    });
   }
 });
 
-// ✅ Jalankan server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// === Webhook notifikasi Midtrans ===
+app.post("/midtrans/webhook", async (req, res) => {
+  try {
+    const notification = req.body;
+    console.log("🔔 Notifikasi Midtrans:", notification);
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Webhook error:", err.message);
+    res.status(500).send("Error");
+  }
+});
+
+// === Tes koneksi ===
+app.get("/", (req, res) => {
+  res.send("Midtrans-Server Connected ✅");
+});
+
+// === Jalankan server ===
+const port = PORT || 10000;
+app.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });
