@@ -62,33 +62,37 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ====== 2. Update catatan order di Shopify ======
-    const updateNote = {
-      order: {
-        id: orderId,
-        note: `✅ Link pembayaran Midtrans: ${redirectUrl}`,
-      },
-    };
+    // ===== Update catatan order di Shopify =====
+try {
+  // Bersihkan ID dari format GraphQL (contoh: gid://shopify/Order/820982911946154500)
+  const cleanOrderId =
+    typeof orderId === "string" && orderId.includes("/")
+      ? orderId.split("/").pop()
+      : orderId;
 
-    // pastikan ID yang dikirim ke Shopify REST API bukan GID
-const cleanOrderId =
-  typeof orderId === "string" && orderId.includes("/")
-    ? orderId.split("/").pop()
-    : orderId;
+  // Buat payload catatan
+  const updateNote = {
+    order: {
+      id: cleanOrderId,
+      note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
+    },
+  };
 
-// lalu ubah URL update catatan jadi:
-const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${cleanOrderId}.json`;
-    try {
-      await axios.put(shopifyUrl, updateNote, {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-        },
-      });
-      console.log("📝 Catatan order Shopify diperbarui dengan link Midtrans");
-    } catch (err) {
-      console.error("❌ Gagal memperbarui catatan order Shopify:", err.response?.data || err.message);
-    }
+  // Buat URL API Shopify (gunakan domain dari environment)
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${cleanOrderId}.json`;
+
+  // Kirim ke Shopify via REST API
+  await axios.put(shopifyUrl, updateNote, {
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+    },
+  });
+
+  console.log("📝 Catatan order Shopify diperbarui dengan link Midtrans");
+} catch (e) {
+  console.error("❌ Gagal memperbarui catatan order Shopify:", e.response?.data || e.message);
+}
 
     // ====== 3. Kirim respon ke Shopify ======
     res.status(200).json({
