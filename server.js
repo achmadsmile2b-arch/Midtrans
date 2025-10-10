@@ -1,32 +1,36 @@
 import express from "express";
+import bodyParser from "body-parser";
 import cors from "cors";
 import axios from "axios";
-import bodyParser from "body-parser";
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// 🔑 Semua key dari Environment Render
+// ======================
+// 🔐 Environment variable
+// ======================
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const MIDTRANS_API_URL = "https://app.midtrans.com/snap/v1/transactions";
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 const SHOPIFY_LOCATION_ID = process.env.SHOPIFY_LOCATION_ID;
+const PORT = process.env.PORT || 10000;
 
-// ✅ Root route
+// ======================
+// 🧩 ROUTE: Root
+// ======================
 app.get("/", (req, res) => {
-  res.send("🚀 Midtrans x Shopify Integration API is running successfully!");
+  res.send("🚀 Midtrans x Shopify Integration Server is live!");
 });
 
-// 🧾 CREATE TRANSACTION — dipanggil dari Shopify (tombol “Bayar via Midtrans”)
+// ======================
+// 💳 ROUTE: Create Transaction (Shopify button)
+// ======================
 app.post("/create-transaction", async (req, res) => {
   try {
     const { amount, customer, order_id } = req.body;
-
-    if (!amount) {
-      return res.status(400).json({ error: "Missing amount" });
-    }
+    if (!amount) return res.status(400).json({ error: "Missing amount" });
 
     const payload = {
       transaction_details: {
@@ -56,40 +60,41 @@ app.post("/create-transaction", async (req, res) => {
   }
 });
 
-// 🔔 WEBHOOK — menerima notifikasi pembayaran dari Midtrans
+// ======================
+// 🔔 ROUTE: Webhook dari Midtrans
+// ======================
 app.post("/webhook", async (req, res) => {
   try {
-    const notification = req.body;
     console.log("🔔 Webhook diterima dari Midtrans:");
-    console.log(JSON.stringify(notification, null, 2));
+    console.log(req.body);
 
-    const { order_id, transaction_status, fraud_status } = notification;
+    // ✅ Balas OK biar Midtrans anggap sukses
+    res.status(200).send("OK");
 
-    // Tentukan status pembayaran Shopify berdasarkan status Midtrans
+    const { order_id, transaction_status, fraud_status } = req.body || {};
+
+    if (!order_id) {
+      console.log("⚠️ Tidak ada order_id (tes webhook / invalid)");
+      return;
+    }
+
     let shopifyStatus = "pending";
     if (transaction_status === "settlement" && fraud_status === "accept") {
       shopifyStatus = "paid";
-    } else if (transaction_status === "pending") {
-      shopifyStatus = "pending";
     } else if (
-      transaction_status === "deny" ||
-      transaction_status === "cancel" ||
-      transaction_status === "expire"
+      ["deny", "cancel", "expire"].includes(transaction_status)
     ) {
       shopifyStatus = "voided";
     }
 
-    // 🔐 Pastikan credential tersedia
     if (!SHOPIFY_STORE_URL || !SHOPIFY_ADMIN_TOKEN) {
-      console.error("❌ Missing Shopify environment variables");
-      return res.status(400).send("Missing Shopify credentials");
+      console.error("❌ Missing Shopify credentials");
+      return;
     }
 
-    // 🔗 Endpoint update order di Shopify
+    // Update status order di Shopify
     const apiUrl = `${SHOPIFY_STORE_URL}/admin/api/2024-10/orders/${order_id}.json`;
-    console.log(`📦 Update ke Shopify: ${apiUrl}`);
 
-    // 🧾 Update status pembayaran
     await axios.put(
       apiUrl,
       {
@@ -109,9 +114,9 @@ app.post("/webhook", async (req, res) => {
 
     console.log(`✅ Shopify order ${order_id} diupdate ke status: ${shopifyStatus}`);
 
-    // 📦 Jika pembayaran sukses → auto fulfillment
+    // Auto-fulfillment kalau sudah paid
     if (shopifyStatus === "paid" && SHOPIFY_LOCATION_ID) {
-      const fulfillmentRes = await axios.post(
+      await axios.post(
         `${SHOPIFY_STORE_URL}/admin/api/2024-10/orders/${order_id}/fulfillments.json`,
         {
           fulfillment: {
@@ -127,26 +132,22 @@ app.post("/webhook", async (req, res) => {
           },
         }
       );
-
       console.log(`📦 Order ${order_id} berhasil di-mark Fulfilled`);
-      console.log("Fulfillment:", fulfillmentRes.data);
     }
-
-    res.status(200).send("OK");
   } catch (error) {
-  console.error("❌ Webhook Error:", error.response?.data || error.message);
-  // tetap kirim 200 agar Midtrans anggap sukses
-  res.status(200).send("OK");
-}
+    console.error("❌ Webhook Error:", error.response?.data || error.message);
+    // tetap kirim 200 agar Midtrans tidak mengulang
+    res.status(200).send("OK");
   }
 });
 
-
-// 💌 FITUR TAMBAHAN: LINK “BAYAR SEKARANG” DARI EMAIL
+// ======================
+// 💌 ROUTE: Link “Bayar Sekarang” dari Email
+// ======================
 app.get("/pay/:order_id", async (req, res) => {
   try {
     const order_id = req.params.order_id;
-    console.log(`🧾 Permintaan pembayaran dari email untuk Order ${order_id}`);
+    console.log(`💳 Permintaan pembayaran dari email untuk Order ${order_id}`);
 
     // Ambil detail order dari Shopify
     const orderRes = await axios.get(
@@ -187,16 +188,20 @@ app.get("/pay/:order_id", async (req, res) => {
     );
 
     const snapUrl = midtransRes.data.redirect_url;
-    console.log(`✅ Redirect pelanggan ke Midtrans Snap: ${snapUrl}`);
-
-    // Redirect pelanggan langsung ke halaman pembayaran
+    console.log(`🔗 Redirect pelanggan ke Midtrans Snap: ${snapUrl}`);
     res.redirect(snapUrl);
   } catch (error) {
-    console.error("❌ Error saat proses link email:", error.response?.data || error.message);
-    res.status(500).send("Terjadi kesalahan saat memproses pembayaran.");
+    console.error(
+      "💥 Error membuat transaksi Midtrans:",
+      error.response?.data || error.message
+    );
+    res.status(500).send("Gagal membuat link pembayaran.");
   }
 });
 
-// ✅ Jalankan server
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+// ======================
+// 🚀 Jalankan server
+// ======================
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
