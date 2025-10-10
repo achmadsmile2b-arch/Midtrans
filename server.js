@@ -62,21 +62,20 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ===== Update catatan order di Shopify (Versi Fix) =====
+    // ===== Update catatan order di Shopify (FINAL FIX) =====
 try {
-  // Bersihkan ID dari GID format
+  // Bersihkan ID dari format GID Shopify
   let cleanOrderId =
     typeof orderId === "string" && orderId.includes("/")
       ? orderId.split("/").pop()
       : orderId;
 
-  // 🔍 Coba ambil order numeric ID pakai GraphQL API
+  // Langkah 1: Ambil legacyResourceId (ID numerik REST API)
   const gqlQuery = {
     query: `
-      {
+      query {
         order(id: "gid://shopify/Order/${cleanOrderId}") {
           id
-          name
           legacyResourceId
         }
       }
@@ -94,11 +93,14 @@ try {
     }
   );
 
-  // Ambil numeric ID sebenarnya
-  const legacyId =
-    gqlResponse.data?.data?.order?.legacyResourceId || cleanOrderId;
+  const legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
+  if (!legacyId) {
+    throw new Error("Legacy ID tidak ditemukan di GraphQL response");
+  }
 
-  // Payload catatan order
+  console.log("🧩 Legacy REST ID ditemukan:", legacyId);
+
+  // Langkah 2: Buat payload untuk update note
   const updateNote = {
     order: {
       id: legacyId,
@@ -106,7 +108,7 @@ try {
     },
   };
 
-  // URL REST API untuk update catatan
+  // Langkah 3: Update catatan via REST API
   const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${legacyId}.json`;
 
   await axios.put(shopifyUrl, updateNote, {
