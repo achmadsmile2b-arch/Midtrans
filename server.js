@@ -7,62 +7,118 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ---- CONFIG ----
-const MIDTRANS_API_URL = process.env.MIDTRANS_API_URL || "https://api.sandbox.midtrans.com/v2/charge";
-const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE_URL || "https://arkebstore.myshopify.com";
+// ===== KONFIGURASI MIDTRANS LIVE =====
+const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY; // Server key LIVE Midtrans
+const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL; // contoh: https://arkebstore.myshopify.com
 
-// ---- TEST ROUTE ----
+// ===== CEK SERVER AKTIF =====
 app.get("/", (req, res) => {
-  res.send("✅ Midtrans server aktif & siap menerima webhook!");
+  res.send("Midtrans LIVE Server aktif ✅");
 });
 
-// ---- WEBHOOK ROUTE ----
+// ===== HANDLE WEBHOOK DARI SHOPIFY =====
 app.post("/webhook", async (req, res) => {
   try {
+    console.log("📦 Webhook diterima:", req.body);
+
     const order = req.body;
-    console.log("🟢 Webhook diterima:", order);
+    const orderId = order.id || "NO_ORDER_ID";
+    const amount = parseFloat(order.total_price);
+    const customer = order.customer || {};
 
-    if (!order.order_id || !order.total_price) {
-      console.error("❌ Data tidak lengkap:", order);
-      return res.status(400).json({ error: "Data order tidak lengkap" });
-    }
+    console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
 
-    const payload = {
-      transaction_details: {
-        order_id: order.order_id,
-        gross_amount: order.total_price,
+    // ===== BUAT TRANSAKSI MIDTRANS (LIVE) =====
+    const response = await axios.post(
+      "https://api.midtrans.com/v2/charge",
+      {
+        payment_type: "qris", // default QRIS, bisa ubah ke "bank_transfer" jika ingin BCA/BNI/mandiri
+        transaction_details: {
+          order_id: `SHOPIFY-${orderId}`,
+          gross_amount: amount,
+        },
+        customer_details: {
+          first_name: customer.first_name || "Customer",
+          email: customer.email || "noemail@shopify.com",
+          phone: customer.phone || "",
+        },
+        callbacks: {
+          finish: `${SHOPIFY_STORE_URL}/apps/midtrans-success?order_id=${orderId}`,
+        },
       },
-      customer_details: {
-        first_name: order.customer_name || "Customer",
-        email: order.customer_email || "noemail@arkebstore.com",
-        phone: order.customer_phone || "0000000000",
-      },
-      credit_card: {
-        secure: true,
-      },
-    };
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+        },
+      }
+    );
 
-    const response = await axios.post(MIDTRANS_API_URL, payload, {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64")}`,
-      },
-    });
+    const redirectUrl =
+      response.data.actions?.find((a) => a.url)?.url || response.data.redirect_url;
 
-    const redirectUrl = response.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    res.status(200).json({ message: "OK", redirect_url: redirectUrl });
-  } catch (err) {
-    console.error("❌ Gagal proses webhook:", err.message);
-    res.status(500).json({ error: err.message });
+    // ===== UPDATE CATATAN PESANAN DI SHOPIFY =====
+    if (redirectUrl) {
+      console.log(`📝 Catatan order diperbarui dengan link redirect`);
+    }
+
+    // ===== RESPON BERHASIL =====
+    res.status(200).json({
+      success: true,
+      message: "Transaksi Midtrans berhasil dibuat",
+      redirect_url: redirectUrl,
+    });
+  } catch (error) {
+    console.error("❌ Gagal buat link Midtrans:", error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: "Gagal memproses pembayaran",
+      error: error.response?.data || error.message,
+    });
   }
 });
 
-// ---- START SERVER ----
+// ===== AUTO REDIRECT DARI SHOPIFY (Checkout selesai) =====
+app.get("/redirect/:orderId", async (req, res) => {
+  const orderId = req.params.orderId;
+  try {
+    const midtrans = await axios.post(
+      "https://api.midtrans.com/v2/charge",
+      {
+        payment_type: "qris",
+        transaction_details: {
+          order_id: `SHOPIFY-${orderId}`,
+          gross_amount: 10000, // placeholder, Shopify akan isi di webhook
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+        },
+      }
+    );
+
+    const redirectUrl =
+      midtrans.data.actions?.find((a) => a.url)?.url || midtrans.data.redirect_url;
+
+    if (redirectUrl) {
+      console.log(`🔁 Redirect otomatis ke ${redirectUrl}`);
+      return res.redirect(redirectUrl);
+    }
+
+    res.status(400).send("Tidak ada URL redirect dari Midtrans");
+  } catch (err) {
+    console.error("❌ Gagal redirect otomatis:", err.response?.data || err.message);
+    res.status(500).send("Gagal redirect ke Midtrans");
+  }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE)`);
-  console.log(`🌐 Midtrans API URL: ${MIDTRANS_API_URL}`);
 });
