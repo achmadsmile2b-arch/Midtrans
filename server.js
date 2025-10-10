@@ -62,26 +62,53 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ===== Update catatan order di Shopify =====
+    // ===== Update catatan order di Shopify (Versi Fix) =====
 try {
-  // Bersihkan ID dari format GraphQL (contoh: gid://shopify/Order/820982911946154500)
-  const cleanOrderId =
+  // Bersihkan ID dari GID format
+  let cleanOrderId =
     typeof orderId === "string" && orderId.includes("/")
       ? orderId.split("/").pop()
       : orderId;
 
-  // Buat payload catatan
+  // 🔍 Coba ambil order numeric ID pakai GraphQL API
+  const gqlQuery = {
+    query: `
+      {
+        order(id: "gid://shopify/Order/${cleanOrderId}") {
+          id
+          name
+          legacyResourceId
+        }
+      }
+    `,
+  };
+
+  const gqlResponse = await axios.post(
+    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
+    gqlQuery,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+      },
+    }
+  );
+
+  // Ambil numeric ID sebenarnya
+  const legacyId =
+    gqlResponse.data?.data?.order?.legacyResourceId || cleanOrderId;
+
+  // Payload catatan order
   const updateNote = {
     order: {
-      id: cleanOrderId,
+      id: legacyId,
       note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
     },
   };
 
-  // Buat URL API Shopify (gunakan domain dari environment)
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${cleanOrderId}.json`;
+  // URL REST API untuk update catatan
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${legacyId}.json`;
 
-  // Kirim ke Shopify via REST API
   await axios.put(shopifyUrl, updateNote, {
     headers: {
       "Content-Type": "application/json",
@@ -91,7 +118,10 @@ try {
 
   console.log("📝 Catatan order Shopify diperbarui dengan link Midtrans");
 } catch (e) {
-  console.error("❌ Gagal memperbarui catatan order Shopify:", e.response?.data || e.message);
+  console.error(
+    "❌ Gagal memperbarui catatan order Shopify:",
+    e.response?.data || e.message
+  );
 }
 
     // ====== 3. Kirim respon ke Shopify ======
