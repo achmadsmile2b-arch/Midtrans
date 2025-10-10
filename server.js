@@ -70,8 +70,14 @@ app.post("/webhook", express.json(), async (req, res) => {
       },
     };
 
-    const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${orderId}.json`;
+    // pastikan ID yang dikirim ke Shopify REST API bukan GID
+const cleanOrderId =
+  typeof orderId === "string" && orderId.includes("/")
+    ? orderId.split("/").pop()
+    : orderId;
 
+// lalu ubah URL update catatan jadi:
+const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${cleanOrderId}.json`;
     try {
       await axios.put(shopifyUrl, updateNote, {
         headers: {
