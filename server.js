@@ -9,20 +9,21 @@ app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 10000;
 
-// === KONFIGURASI LIVE ===
-const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY; // 🔑 pakai server key LIVE
-const MIDTRANS_BASE_URL = "https://api.midtrans.com/v2/charge"; // ⬅️ bukan sandbox lagi
+// === Konfigurasi Environment ===
+const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY; // 🔑 server key LIVE Midtrans
+const MIDTRANS_BASE_URL = "https://api.midtrans.com/v2/charge";
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE; // contoh: arkebstore.myshopify.com
 
-// === Webhook Shopify untuk redirect otomatis ke Midtrans ===
+// ✅ Tempat menyimpan link pembayaran sementara di memori (bisa pakai DB nanti)
+const paymentLinks = new Map();
+
+// === Webhook dari Shopify ===
 app.post("/webhook", async (req, res) => {
   try {
     const order = req.body;
-    console.log("🟢 Webhook diterima:", order.id);
-
     const orderId = order.id;
-    const total = order.total_price;
+    const total = Math.round(order.total_price);
     const email = order.email || "pelanggan@domain.com";
     const name =
       (order.shipping_address?.first_name || "") +
@@ -30,12 +31,14 @@ app.post("/webhook", async (req, res) => {
       (order.shipping_address?.last_name || "");
     const phone = order.shipping_address?.phone || "0000000000";
 
-    // === Payload ke Midtrans LIVE ===
+    console.log(`🟢 Webhook diterima: Order ${orderId}`);
+
+    // === Payload Midtrans (LIVE) ===
     const payload = {
       payment_type: "bank_transfer",
       transaction_details: {
         order_id: `SHOPIFY-${orderId}`,
-        gross_amount: Math.round(total),
+        gross_amount: total,
       },
       customer_details: {
         first_name: name,
@@ -43,12 +46,11 @@ app.post("/webhook", async (req, res) => {
         phone: phone,
       },
       bank_transfer: {
-        bank: "bca", // bisa diganti bni, bri, permata, dll
+        bank: "bca",
       },
     };
 
-    console.log("📦 Kirim payload ke Midtrans LIVE:", payload);
-
+    // === Request ke Midtrans
     const response = await axios.post(MIDTRANS_BASE_URL, payload, {
       headers: {
         Authorization:
@@ -58,16 +60,16 @@ app.post("/webhook", async (req, res) => {
     });
 
     const snapLink = response.data.redirect_url;
-    console.log("✅ Link Midtrans LIVE:", snapLink);
+    console.log("✅ Link pembayaran Midtrans:", snapLink);
 
-    // Simpan ke catatan order Shopify
+    // Simpan link ke Map sementara
+    paymentLinks.set(String(orderId), snapLink);
+
+    // Tambahkan catatan ke order Shopify
     await axios.put(
       `https://${SHOPIFY_STORE}/admin/api/2025-10/orders/${orderId}.json`,
       {
-        order: {
-          id: orderId,
-          note: `Link pembayaran Midtrans (LIVE): ${snapLink}`,
-        },
+        order: { id: orderId, note: `Link pembayaran: https://midtrans.onrender.com/pay/${orderId}` },
       },
       {
         headers: {
@@ -77,32 +79,45 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("📝 Catatan order Shopify diperbarui");
+    console.log("📝 Catatan order diperbarui dengan link redirect");
 
-    // === Redirect pelanggan ke halaman Midtrans ===
-    const redirectHTML = `
-      <html>
-        <head>
-          <meta http-equiv="refresh" content="0;url=${snapLink}" />
-          <script>window.location.href="${snapLink}";</script>
-        </head>
-        <body>
-          <p>Mengalihkan ke halaman pembayaran Midtrans...</p>
-        </body>
-      </html>
-    `;
-
-    return res.status(200).send(redirectHTML);
+    return res.status(200).send("Webhook processed ✅");
   } catch (err) {
-    console.error("❌ Gagal membuat link Midtrans LIVE:", err.response?.data || err.message);
+    console.error("❌ Gagal proses webhook:", err.response?.data || err.message);
     return res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("🚀 Server Auto Redirect Midtrans LIVE aktif!");
+// === Halaman Redirect /pay/:orderId ===
+app.get("/pay/:orderId", (req, res) => {
+  const orderId = req.params.orderId;
+  const snapLink = paymentLinks.get(String(orderId));
+
+  if (!snapLink) {
+    return res
+      .status(404)
+      .send("<h3>⚠️ Link pembayaran tidak ditemukan. Silakan cek email atau hubungi admin.</h3>");
+  }
+
+  // Redirect otomatis ke Midtrans
+  const html = `
+    <html>
+      <head>
+        <meta http-equiv="refresh" content="1;url=${snapLink}" />
+        <script>window.location.href="${snapLink}";</script>
+      </head>
+      <body style="font-family:sans-serif;text-align:center;margin-top:100px;">
+        <h2>💳 Mengalihkan ke halaman pembayaran Midtrans...</h2>
+        <p>Jika tidak berpindah otomatis, <a href="${snapLink}">klik di sini</a>.</p>
+      </body>
+    </html>
+  `;
+  res.send(html);
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server berjalan di port ${PORT} (LIVE MODE)`);
+// === Tes Route ===
+app.get("/", (req, res) => {
+  res.send("🚀 Server Midtrans Redirect aktif (LIVE)");
 });
+
+app.listen(PORT, () => console.log(`✅ Server berjalan di port ${PORT} (LIVE)`));
