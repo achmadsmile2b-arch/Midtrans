@@ -20,7 +20,10 @@ app.post("/webhook", express.json(), async (req, res) => {
     const order = req.body;
     console.log("📦 Webhook diterima:", order);
 
-    const orderId = order.id || `ORD-${Date.now()}`;
+    const orderId =
+  (typeof order.id === "string" && order.id.includes("/"))
+    ? order.id.split("/").pop()
+    : order.id || `ORD-${Date.now()}`;
     const amount = parseFloat(order.total_price) || 0;
     const customer = order.customer || {};
 
