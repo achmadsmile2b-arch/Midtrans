@@ -1,5 +1,6 @@
 import express from "express";
 import axios from "axios";
+import crypto from "crypto";
 import bodyParser from "body-parser";
 import cors from "cors";
 
@@ -7,110 +8,73 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Render akan otomatis inject ini dari Environment Variable
-const {
-  SHOPIFY_STORE_URL,
-  SHOPIFY_ADMIN_TOKEN,
-  MIDTRANS_SERVER_KEY,
-  MIDTRANS_API_URL,
-  PORT
-} = process.env;
+// ✅ Route untuk cek server
+app.get("/", (req, res) => {
+  res.send("Midtrans Server aktif ✅");
+});
 
-// === HEADER UNTUK SHOPIFY ===
-const shopifyHeaders = {
-  "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
-  "Content-Type": "application/json",
-};
-
-// === MIDTRANS CHECKOUT ===
+// ✅ Webhook dari Shopify
 app.post("/midtrans/create", async (req, res) => {
+  console.log("✅ Webhook diterima dari Shopify:", req.body);
+
   try {
-    const { order_id, gross_amount, customer } = req.body;
+    const order = req.body;
+    const orderId = order.id || order.name || `ORD-${Date.now()}`;
+    const grossAmount = order.total_price || order.current_total_price || 0;
+    const email = order.email || "customer@example.com";
+    const name = order.customer?.first_name || "Pelanggan";
+    const phone = order.shipping_address?.phone || "08123456789";
 
-    console.log(`🧾 Permintaan pembayaran diterima untuk Order ID: ${order_id}`);
+    console.log(`🔹 Membuat link Midtrans untuk order ${orderId}`);
 
-    // === Buat transaksi di Midtrans ===
+    // ✅ Payload Snap Midtrans
     const payload = {
       transaction_details: {
-        order_id,
-        gross_amount,
+        order_id: orderId,
+        gross_amount: parseInt(grossAmount),
       },
       customer_details: {
-        first_name: customer?.first_name || "Customer",
-        email: customer?.email || "noemail@example.com",
-        phone: customer?.phone || "",
+        first_name: name,
+        email: email,
+        phone: phone,
       },
-      enabled_payments: ["bank_transfer", "qris", "gopay", "credit_card"],
+      item_details: [
+        {
+          id: "order-item",
+          price: parseInt(grossAmount),
+          quantity: 1,
+          name: `Pembayaran Order ${orderId}`,
+        },
+      ],
+      credit_card: {
+        secure: true,
+      },
     };
 
-    const midtransResponse = await axios.post(MIDTRANS_API_URL, payload, {
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Basic ${Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64")}`,
-      },
-    });
-
-    const redirectUrl = midtransResponse.data.redirect_url;
-    console.log("✅ Midtrans redirect URL:", redirectUrl);
-
-    // === SIMPAN LINK KE CATATAN ORDER DI SHOPIFY ===
-    try {
-      const orderUpdateUrl = `${SHOPIFY_STORE_URL}/admin/api/2023-10/orders/${order_id}.json`;
-
-      const response = await axios({
-        method: "put",
-        url: orderUpdateUrl,
-        headers: shopifyHeaders,
-        data: {
-          order: {
-            id: order_id,
-            note: redirectUrl, // simpan link Midtrans ke catatan order
-          },
+    // ✅ Request ke Midtrans Snap
+    const response = await axios.post(
+      "https://app.midtrans.com/snap/v1/transactions",
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            "Basic " +
+            Buffer.from(process.env.MIDTRANS_SERVER_KEY + ":").toString("base64"),
         },
-      });
+      }
+    );
 
-      console.log(`✅ Link Midtrans berhasil disimpan di Shopify (status ${response.status})`);
-    } catch (shopifyErr) {
-      console.error("⚠️ Gagal update note di Shopify:", shopifyErr.response?.data || shopifyErr.message);
-      console.error("⚠️ Pastikan SHOPIFY_ADMIN_TOKEN kamu adalah token Admin API (bukan Storefront).");
-    }
+    const snapLink = response.data.redirect_url;
+    console.log("✅ Link Snap Midtrans:", snapLink);
 
-    // === Kembalikan response ke client ===
-    res.json({
-      success: true,
-      redirectUrl,
-    });
-
+    res.status(200).json({ success: true, snapLink });
   } catch (err) {
     console.error("❌ Gagal buat link Midtrans:", err.response?.data || err.message);
-    res.status(500).json({
-      success: false,
-      error: err.response?.data || err.message,
-    });
+    res.status(500).json({ error: err.response?.data || err.message });
   }
 });
 
-// === WEBHOOK MIDTRANS ===
-app.post("/midtrans/webhook", async (req, res) => {
-  try {
-    const notification = req.body;
-    console.log("🔔 Notifikasi dari Midtrans diterima:", notification);
-
-    // kirim respon OK supaya Midtrans gak retry
-    res.status(200).send("OK");
-  } catch (err) {
-    console.error("❌ Gagal memproses webhook:", err.message);
-    res.status(500).send("Error");
-  }
-});
-
-// === TES KONEKSI SERVER ===
-app.get("/", (req, res) => {
-  res.send("✅ Midtrans-Server Connected dan Aktif");
-});
-
-// === JALANKAN SERVER ===
-const port = PORT || 10000;
-app.listen(port, () => {
-  console.log(`🚀 Server berjalan di port ${port}`);
-});
+// ✅ Jalankan server
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Server berjalan di port ${PORT}`));
