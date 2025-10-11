@@ -176,25 +176,22 @@ app.post("/midtrans-webhook", async (req, res) => {
 
     console.log(`🟢 Status order ${orderId}: ${statusText}`);
 
-    // Hanya update Shopify kalau orderId-nya adalah angka (Shopify order)
+    // Cek apakah order berasal dari Shopify (ID numerik)
     if (/^\d+$/.test(orderId)) {
       const updateUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
-
-      await axios.put(updateUrl, {
-        order: {
-          id: orderId,
-          note: statusText,
-        },
-      }, {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-        },
-      });
-
+      await axios.put(
+        updateUrl,
+        { order: { id: orderId, note: statusText } },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+          },
+        }
+      );
       console.log("📝 Status order Shopify berhasil diperbarui");
     } else {
-      console.log("⚠️ Bukan order Shopify asli (tes dari Midtrans), lewati update Shopify.");
+      console.log("⚠️ Bukan order Shopify (tes dari Midtrans), lewati update Shopify.");
     }
 
     res.sendStatus(200);
