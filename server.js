@@ -163,7 +163,51 @@ app.post("/create-payment", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// -----------------------------------------------------------------------------
+// 3. Webhook dari Midtrans → Update status order di Shopify
+// -----------------------------------------------------------------------------
+app.post("/midtrans-webhook", async (req, res) => {
+  try {
+    const notif = req.body;
+    console.log("📬 Webhook dari Midtrans diterima:", notif);
 
+    const orderId = notif.order_id?.replace("CART-", "") || notif.order_id;
+    const transactionStatus = notif.transaction_status;
+
+    console.log(`➡️ Update status order ${orderId} → ${transactionStatus}`);
+
+    // Tentukan status Shopify berdasarkan status Midtrans
+    let financialStatus = "pending";
+    if (transactionStatus === "capture" || transactionStatus === "settlement") {
+      financialStatus = "paid";
+    } else if (transactionStatus === "cancel" || transactionStatus === "deny" || transactionStatus === "expire") {
+      financialStatus = "cancelled";
+    }
+
+    // Update ke Shopify REST API
+    const shopifyUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
+
+    const update = {
+      order: {
+        financial_status: financialStatus,
+        note: `🪙 Status Midtrans: ${transactionStatus}`,
+      },
+    };
+
+    const response = await axios.put(shopifyUrl, update, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+      },
+    });
+
+    console.log("✅ Shopify order status updated:", response.data.order.financial_status);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("❌ Gagal update status ke Shopify:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 // ============================================================
 // 🚀 Start Server
 // ============================================================
