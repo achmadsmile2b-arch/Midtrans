@@ -161,67 +161,45 @@ app.post("/create-payment", async (req, res) => {
   }
 });
 
-// ================================
-// 🔔 Webhook dari Midtrans → Update status di Shopify
-// ================================
+// Midtrans webhook
 app.post("/midtrans-webhook", async (req, res) => {
   try {
-    console.log("📬 Webhook dari Midtrans diterima:", req.body);
+    const data = req.body;
+    console.log("📬 Webhook dari Midtrans diterima:", data);
 
-    const {
-      order_id,
-      transaction_status,
-      fraud_status,
-      payment_type,
-      gross_amount,
-    } = req.body;
+    const orderId = data.order_id;
+    const transactionStatus = data.transaction_status;
 
-    let statusMessage = "";
-    let fulfillmentStatus = "";
+    let statusText = "❌ Pembayaran gagal";
+    if (transactionStatus === "settlement") statusText = "✅ Pembayaran berhasil";
+    else if (transactionStatus === "pending") statusText = "⏳ Menunggu pembayaran";
 
-    switch (transaction_status) {
-      case "capture":
-      case "settlement":
-        statusMessage = "✅ Pembayaran berhasil";
-        fulfillmentStatus = "fulfilled";
-        break;
-      case "pending":
-        statusMessage = "⏳ Menunggu pembayaran pelanggan";
-        fulfillmentStatus = "unfulfilled";
-        break;
-      case "deny":
-      case "expire":
-      case "cancel":
-        statusMessage = "❌ Pembayaran gagal atau dibatalkan";
-        fulfillmentStatus = "cancelled";
-        break;
-      default:
-        statusMessage = "ℹ️ Status tidak dikenal";
+    console.log(`🟢 Status order ${orderId}: ${statusText}`);
+
+    // Hanya update Shopify kalau orderId-nya adalah angka (Shopify order)
+    if (/^\d+$/.test(orderId)) {
+      const updateUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
+
+      await axios.put(updateUrl, {
+        order: {
+          id: orderId,
+          note: statusText,
+        },
+      }, {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+        },
+      });
+
+      console.log("📝 Status order Shopify berhasil diperbarui");
+    } else {
+      console.log("⚠️ Bukan order Shopify asli (tes dari Midtrans), lewati update Shopify.");
     }
 
-    console.log(`➡️ Status order ${order_id}: ${statusMessage}`);
-
-    // Update order di Shopify
-    const shopifyUpdate = {
-      order: {
-        note: `${statusMessage}\nTipe: ${payment_type}\nJumlah: Rp ${gross_amount}`,
-        fulfillment_status: fulfillmentStatus,
-      },
-    };
-
-    const shopifyUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${order_id}.json`;
-
-    await axios.put(shopifyUrl, shopifyUpdate, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
-      },
-    });
-
-    console.log("🟢 Status pembayaran Shopify diperbarui:", statusMessage);
     res.sendStatus(200);
-  } catch (error) {
-    console.error("❌ Gagal proses webhook Midtrans:", error.message);
+  } catch (err) {
+    console.error("❌ Gagal proses webhook Midtrans:", err.message);
     res.sendStatus(500);
   }
 });
