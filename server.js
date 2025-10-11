@@ -68,16 +68,13 @@ try {
 
   const gqlQuery = {
   query: `
-    query getLegacyId($id: ID!) {
-      order(id: $id) {
+    query {
+      order(id: "gid://shopify/Order/${orderId}") {
         id
         legacyResourceId
       }
     }
   `,
-  variables: {
-    id: order.admin_graphql_api_id || `gid://shopify/Order/${orderId}`,
-  },
 };
 
   const gqlResponse = await axios.post(
