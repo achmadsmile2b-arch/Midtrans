@@ -6,6 +6,11 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 
 // 🔑 Variabel environment wajib (atur di Render Dashboard)
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
@@ -142,10 +147,10 @@ app.post("/create-payment", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------------
+// ------------------------------------------------------------
 // Start server
-// -----------------------------------------------------------------------------
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE)`);
+// ------------------------------------------------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE, Render Ready)`);
 });
