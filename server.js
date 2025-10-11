@@ -67,15 +67,15 @@ try {
   console.log("🟡 [STEP 1] Mulai ambil legacy ID via GraphQL...");
 
   const gqlQuery = {
-  query: `
-    query {
-      order(id: "gid://shopify/Order/${orderId}") {
-        id
-        legacyResourceId
+    query: `
+      query {
+        order(id: "gid://shopify/Order/${orderId}") {
+          id
+          legacyResourceId
+        }
       }
-    }
-  `,
-};
+    `,
+  };
 
   const gqlResponse = await axios.post(
     `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/graphql.json`,
@@ -90,11 +90,16 @@ try {
 
   console.log("🟢 [STEP 2] Response GraphQL:", JSON.stringify(gqlResponse.data, null, 2));
 
-  const legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
+  let legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
   console.log("🧩 Legacy REST ID:", legacyId);
 
+  if (!legacyId && order.admin_graphql_api_id) {
+    console.warn("⚠️ Legacy ID kosong, fallback pakai admin_graphql_api_id langsung");
+    legacyId = order.admin_graphql_api_id.split("/").pop();
+  }
+
   if (!legacyId) {
-    console.warn("⚠️ Legacy ID tidak ditemukan. Gunakan orderId langsung:", orderId);
+    console.warn("⚠️ Legacy ID tidak ditemukan, fallback ke orderId:", orderId);
   }
 
   const finalId = legacyId || orderId;
