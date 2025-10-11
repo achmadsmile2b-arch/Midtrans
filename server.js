@@ -81,7 +81,7 @@ try {
 };
 
   const gqlResponse = await axios.post(
-    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
+    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/graphql.json`,
     gqlQuery,
     {
       headers: {
@@ -110,7 +110,7 @@ try {
     },
   };
 
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${finalId}.json`;
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${finalId}.json`;
 
   const restResponse = await axios.put(shopifyUrl, updateNote, {
     headers: {
