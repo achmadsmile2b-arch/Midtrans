@@ -20,9 +20,10 @@ app.post("/webhook", express.json(), async (req, res) => {
     const order = req.body;
     console.log("📦 Webhook diterima:", order);
 
-    const orderId =
-  (typeof order.id === "string" && order.id.includes("/"))
-    ? order.id.split("/").pop()
+    const orderId = 
+  order.admin_graphql_api_id 
+    ? order.admin_graphql_api_id.split("/").pop() 
+    : (order.id || `ORD-${Date.now()}`);
     : order.id || `ORD-${Date.now()}`;
     const amount = parseFloat(order.total_price) || 0;
     const customer = order.customer || {};
@@ -112,7 +113,7 @@ try {
     },
   };
 
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${finalId}.json`;
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
 
   const restResponse = await axios.put(shopifyUrl, updateNote, {
     headers: {
