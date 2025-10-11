@@ -138,7 +138,7 @@ try {
   }
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE)`);
+const PORT = process.env.PORT || 3000; // gunakan 3000 hanya fallback
+app.listen(process.env.PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server berjalan di port ${process.env.PORT} (LIVE MODE)`);
 });
