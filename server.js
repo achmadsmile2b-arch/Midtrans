@@ -67,15 +67,15 @@ try {
   console.log("🟡 [STEP 1] Mulai ambil legacy ID via GraphQL...");
 
   const gqlQuery = {
-    query: `
-      query {
-        order(id: "gid://shopify/Order/${orderId}") {
-          id
-          legacyResourceId
-        }
+  query: `
+    query {
+      order(id: "${order.admin_graphql_api_id || cleanOrderId}") {
+        id
+        legacyResourceId
       }
-    `,
-  };
+    }
+  `,
+};
 
   const gqlResponse = await axios.post(
     `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
