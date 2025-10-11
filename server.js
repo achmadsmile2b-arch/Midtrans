@@ -62,33 +62,65 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ===== 2. Update catatan order di Shopify =====
+    // ===== 2. Update catatan order di Shopify (FINAL FIX) =====
 try {
+  console.log("🟡 [STEP 1] Mulai ambil legacy ID via GraphQL...");
+
+  const gqlQuery = {
+    query: `
+      query {
+        order(id: "gid://shopify/Order/${orderId}") {
+          id
+          legacyResourceId
+        }
+      }
+    `,
+  };
+
+  const gqlResponse = await axios.post(
+    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
+    gqlQuery,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+      },
+    }
+  );
+
+  console.log("🟢 [STEP 2] Response GraphQL:", JSON.stringify(gqlResponse.data, null, 2));
+
+  const legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
+  console.log("🧩 Legacy REST ID:", legacyId);
+
+  if (!legacyId) {
+    console.warn("⚠️ Legacy ID tidak ditemukan. Gunakan orderId langsung:", orderId);
+  }
+
+  const finalId = legacyId || orderId;
+
+  console.log("🟡 [STEP 3] Kirim PUT ke REST API Shopify...");
   const updateNote = {
     order: {
-      id: orderId,
+      id: finalId,
       note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
     },
   };
 
-  // Gunakan REST API (bukan GraphQL)
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${orderId}.json`;
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${finalId}.json`;
 
-  await axios.put(shopifyUrl, updateNote, {
+  const restResponse = await axios.put(shopifyUrl, updateNote, {
     headers: {
       "Content-Type": "application/json",
       "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
     },
   });
 
+  console.log("🟢 [STEP 4] Response REST:", JSON.stringify(restResponse.data, null, 2));
   console.log("📝 Catatan order Shopify berhasil diperbarui");
 } catch (e) {
-  console.error(
-    "❌ Gagal memperbarui catatan order Shopify:",
-    e.response?.data || e.message
-  );
+  console.error("❌ Gagal memperbarui catatan order Shopify:", e.response?.data || e.message);
 }
-
     // ====== 3. Kirim respon ke Shopify ======
     res.status(200).json({
       success: true,
