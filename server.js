@@ -6,7 +6,7 @@ import cors from "cors";
 const app = express();
 
 // ================================
-// 🧩 Middleware dasar
+// 🧩 Middleware
 // ================================
 app.use(bodyParser.json());
 app.use(
@@ -18,7 +18,7 @@ app.use(
 );
 
 // ================================
-// 🔑 Environment Variables (Render Dashboard)
+// 🔑 Environment Variables
 // ================================
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
@@ -49,7 +49,7 @@ app.post("/webhook", async (req, res) => {
 
     console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
 
-    // Buat transaksi di Midtrans
+    // Buat transaksi Midtrans
     const midtransResponse = await axios.post(
       "https://app.midtrans.com/snap/v1/transactions",
       {
@@ -80,7 +80,7 @@ app.post("/webhook", async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // Update catatan di Shopify
+    // Simpan link ke catatan order Shopify
     try {
       const updateNote = {
         order: {
@@ -114,7 +114,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ================================
-// 💳 Buat pembayaran langsung dari Cart
+// 💳 Buat transaksi langsung dari Cart
 // ================================
 app.post("/create-payment", async (req, res) => {
   try {
@@ -162,9 +162,74 @@ app.post("/create-payment", async (req, res) => {
 });
 
 // ================================
+// 🔔 Webhook dari Midtrans → Update status di Shopify
+// ================================
+app.post("/midtrans-webhook", async (req, res) => {
+  try {
+    console.log("📬 Webhook dari Midtrans diterima:", req.body);
+
+    const {
+      order_id,
+      transaction_status,
+      fraud_status,
+      payment_type,
+      gross_amount,
+    } = req.body;
+
+    let statusMessage = "";
+    let fulfillmentStatus = "";
+
+    switch (transaction_status) {
+      case "capture":
+      case "settlement":
+        statusMessage = "✅ Pembayaran berhasil";
+        fulfillmentStatus = "fulfilled";
+        break;
+      case "pending":
+        statusMessage = "⏳ Menunggu pembayaran pelanggan";
+        fulfillmentStatus = "unfulfilled";
+        break;
+      case "deny":
+      case "expire":
+      case "cancel":
+        statusMessage = "❌ Pembayaran gagal atau dibatalkan";
+        fulfillmentStatus = "cancelled";
+        break;
+      default:
+        statusMessage = "ℹ️ Status tidak dikenal";
+    }
+
+    console.log(`➡️ Status order ${order_id}: ${statusMessage}`);
+
+    // Update order di Shopify
+    const shopifyUpdate = {
+      order: {
+        note: `${statusMessage}\nTipe: ${payment_type}\nJumlah: Rp ${gross_amount}`,
+        fulfillment_status: fulfillmentStatus,
+      },
+    };
+
+    const shopifyUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${order_id}.json`;
+
+    await axios.put(shopifyUrl, shopifyUpdate, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+      },
+    });
+
+    console.log("🟢 Status pembayaran Shopify diperbarui:", statusMessage);
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("❌ Gagal proses webhook Midtrans:", error.message);
+    res.sendStatus(500);
+  }
+});
+
+// ================================
 // 🚀 Jalankan Server
 // ================================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE, Render Ready)`);
+  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE + Auto Update Status)`);
 });
