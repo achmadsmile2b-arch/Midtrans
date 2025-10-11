@@ -24,7 +24,7 @@ app.post("/webhook", express.json(), async (req, res) => {
   order.admin_graphql_api_id 
     ? order.admin_graphql_api_id.split("/").pop() 
     : (order.id || `ORD-${Date.now()}`);
-    const amount = parseFloat(order.total_price) || 0;
+    const amount = Math.round(parseFloat(order.total_price)) || 0;
     const customer = order.customer || {};
 
     console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
