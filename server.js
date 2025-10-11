@@ -62,29 +62,30 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ===== Update catatan order di Shopify (FINAL FIX) =====
+    // ===== Update catatan order Shopify via GraphQL API =====
 try {
-  // Bersihkan ID dari format GID Shopify
-  let cleanOrderId =
-    typeof orderId === "string" && orderId.includes("/")
-      ? orderId.split("/").pop()
-      : orderId;
+  const gid = order.id?.toString().startsWith("gid://")
+    ? order.id
+    : `gid://shopify/Order/${order.id}`;
 
-  // Langkah 1: Ambil legacyResourceId (ID numerik REST API)
-  const gqlQuery = {
+  const gqlMutation = {
     query: `
-      query {
-        order(id: "gid://shopify/Order/${cleanOrderId}") {
-          id
-          legacyResourceId
+      mutation updateOrder($id: ID!, $note: String!) {
+        orderUpdate(input: {id: $id, note: $note}) {
+          order { id note }
+          userErrors { field message }
         }
       }
     `,
+    variables: {
+      id: gid,
+      note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
+    },
   };
 
-  const gqlResponse = await axios.post(
+  const gqlResp = await axios.post(
     `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
-    gqlQuery,
+    gqlMutation,
     {
       headers: {
         "Content-Type": "application/json",
@@ -93,43 +94,14 @@ try {
     }
   );
 
-  const legacyId = gqlResponse.data?.data?.order?.legacyResourceId;
-let finalOrderId;
-if (legacyId) {
-  finalOrderId = legacyId;
-  console.log("🧩 Legacy REST ID ditemukan:", finalOrderId);
-} else {
-  // fallback: gunakan ID dari webhook langsung (angka murni)
-  finalOrderId = cleanOrderId;
-  console.warn("⚠️ Legacy ID tidak ditemukan, gunakan ID webhook:", finalOrderId);
-}
-
-  console.log("🧩 Legacy REST ID ditemukan:", legacyId);
-
-  // Langkah 2: Buat payload untuk update note
-  const updateNote = {
-    order: {
-      id: legacyId,
-      note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
-    },
-  };
-
-  // Langkah 3: Update catatan via REST API
-  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${finalOrderId}.json`;
-
-  await axios.put(shopifyUrl, updateNote, {
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-    },
-  });
-
-  console.log("📝 Catatan order Shopify diperbarui dengan link Midtrans");
-} catch (e) {
-  console.error(
-    "❌ Gagal memperbarui catatan order Shopify:",
-    e.response?.data || e.message
-  );
+  const errors = gqlResp.data?.data?.orderUpdate?.userErrors;
+  if (errors && errors.length) {
+    console.error("❌ Gagal update note GraphQL:", errors);
+  } else {
+    console.log("📝 Catatan order Shopify diperbarui lewat GraphQL");
+  }
+} catch (err) {
+  console.error("❌ Error GraphQL update:", err.response?.data || err.message);
 }
 
     // ====== 3. Kirim respon ke Shopify ======
