@@ -4,41 +4,50 @@ import bodyParser from "body-parser";
 import cors from "cors";
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json());
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
 
-// 🔑 Variabel environment wajib (atur di Render Dashboard)
+// ============================================================
+// 🔧 Middleware & konfigurasi dasar
+// ============================================================
+app.use(bodyParser.json());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// ============================================================
+// 🔑 Environment variable dari Render Dashboard
+// ============================================================
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 
-// ✅ Tes koneksi server
+// ============================================================
+// 🌐 Endpoint tes koneksi
+// ============================================================
 app.get("/", (req, res) => {
   res.send("✅ Midtrans LIVE server aktif dan siap menerima request.");
 });
 
-// -----------------------------------------------------------------------------
-// 1. Webhook dari Shopify (order sudah dibuat)
-// -----------------------------------------------------------------------------
+// ============================================================
+// 📦 1. Webhook Shopify → buat link pembayaran Midtrans
+// ============================================================
 app.post("/webhook", async (req, res) => {
   try {
     const order = req.body;
     console.log("📦 Webhook Shopify diterima:", order);
 
     const orderId =
-      order.admin_graphql_api_id
-        ? order.admin_graphql_api_id.split("/").pop()
-        : order.id || `ORD-${Date.now()}`;
+      order.admin_graphql_api_id?.split("/").pop() || order.id || `ORD-${Date.now()}`;
     const amount = Math.round(parseFloat(order.total_price)) || 0;
     const customer = order.customer || {};
 
     console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
 
+    // 🔹 Buat transaksi ke Midtrans
     const midtransResponse = await axios.post(
       "https://app.midtrans.com/snap/v1/transactions",
       {
@@ -60,8 +69,7 @@ app.post("/webhook", async (req, res) => {
         headers: {
           "Content-Type": "application/json",
           Authorization:
-            "Basic " +
-            Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
         },
       }
     );
@@ -69,13 +77,13 @@ app.post("/webhook", async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link Midtrans:", redirectUrl);
 
-    // Update catatan order di Shopify
+    // 🔹 Update catatan order di Shopify
     try {
       const updateNote = {
         order: { note: `✅ Link pembayaran Midtrans: ${redirectUrl}` },
       };
-      const restUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
 
+      const restUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
       await axios.put(restUrl, updateNote, {
         headers: {
           "Content-Type": "application/json",
@@ -99,16 +107,23 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------------
-// 2. Endpoint baru: buat transaksi langsung dari halaman CART
-// -----------------------------------------------------------------------------
+// ============================================================
+// 💳 2. Endpoint: Buat transaksi langsung dari halaman CART
+// ============================================================
 app.post("/create-payment", async (req, res) => {
   try {
     const { items, total_price, customer } = req.body;
+
+    if (!items || !total_price) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Data cart tidak lengkap." });
+    }
+
     const orderId = `CART-${Date.now()}`;
     const amount = Math.round(parseFloat(total_price)) || 0;
 
-    console.log(`➡️ Membuat transaksi langsung dari CART: ${orderId}`);
+    console.log(`🛒 Membuat transaksi dari CART: ${orderId}`);
 
     const midtransResponse = await axios.post(
       "https://app.midtrans.com/snap/v1/transactions",
@@ -118,38 +133,40 @@ app.post("/create-payment", async (req, res) => {
           gross_amount: amount,
         },
         item_details: items.map((i) => ({
-          id: i.id,
-          price: i.price,
-          quantity: i.quantity,
-          name: i.title,
+          id: i.id || "item",
+          price: i.price || 0,
+          quantity: i.quantity || 1,
+          name: i.title || "Produk",
         })),
         customer_details: {
           first_name: customer?.first_name || "Guest",
           email: customer?.email || "unknown@example.com",
+          phone: customer?.phone || "",
         },
       },
       {
         headers: {
           "Content-Type": "application/json",
           Authorization:
-            "Basic " +
-            Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
         },
       }
     );
 
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Redirect URL Midtrans:", redirectUrl);
-    res.json({ success: true, redirect_url: redirectUrl });
+
+    // 🔹 Beri respon agar tombol Shopify bisa redirect
+    res.status(200).json({ success: true, redirect_url: redirectUrl });
   } catch (error) {
     console.error("❌ Gagal buat transaksi langsung:", error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ------------------------------------------------------------
-// Start server
-// ------------------------------------------------------------
+// ============================================================
+// 🚀 Start Server
+// ============================================================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE, Render Ready)`);
