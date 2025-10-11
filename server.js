@@ -62,46 +62,31 @@ app.post("/webhook", express.json(), async (req, res) => {
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
 
-    // ===== Update catatan order Shopify via GraphQL API =====
+    // ===== 2. Update catatan order di Shopify =====
 try {
-  const gid = order.id?.toString().startsWith("gid://")
-    ? order.id
-    : `gid://shopify/Order/${order.id}`;
-
-  const gqlMutation = {
-    query: `
-      mutation updateOrder($id: ID!, $note: String!) {
-        orderUpdate(input: {id: $id, note: $note}) {
-          order { id note }
-          userErrors { field message }
-        }
-      }
-    `,
-    variables: {
-      id: gid,
+  const updateNote = {
+    order: {
+      id: orderId,
       note: `✅ Link pembayaran Midtrans (LIVE): ${redirectUrl}`,
     },
   };
 
-  const gqlResp = await axios.post(
-    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
-    gqlMutation,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-      },
-    }
-  );
+  // Gunakan REST API (bukan GraphQL)
+  const shopifyUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/orders/${orderId}.json`;
 
-  const errors = gqlResp.data?.data?.orderUpdate?.userErrors;
-  if (errors && errors.length) {
-    console.error("❌ Gagal update note GraphQL:", errors);
-  } else {
-    console.log("📝 Catatan order Shopify diperbarui lewat GraphQL");
-  }
-} catch (err) {
-  console.error("❌ Error GraphQL update:", err.response?.data || err.message);
+  await axios.put(shopifyUrl, updateNote, {
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+    },
+  });
+
+  console.log("📝 Catatan order Shopify berhasil diperbarui");
+} catch (e) {
+  console.error(
+    "❌ Gagal memperbarui catatan order Shopify:",
+    e.response?.data || e.message
+  );
 }
 
     // ====== 3. Kirim respon ke Shopify ======
