@@ -51,31 +51,34 @@ app.post("/webhook", async (req, res) => {
 
     // Buat transaksi Midtrans
     const midtransResponse = await axios.post(
-      "https://app.midtrans.com/snap/v1/transactions",
-      {
-        transaction_details: {
-          order_id: orderId,
-          gross_amount: amount,
-        },
-        customer_details: {
-          first_name: customer.first_name || "Pelanggan",
-          email: customer.email || "unknown@example.com",
-          phone: customer.phone || "",
-        },
-        credit_card: { secure: true },
-        callbacks: {
-          finish: `${SHOPIFY_STORE_URL}/checkout/thank_you`,
-        },
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization:
-            "Basic " +
-            Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
-        },
-      }
-    );
+  "https://app.midtrans.com/snap/v1/transactions",
+  {
+    transaction_details: {
+      order_id: orderId,
+      gross_amount: amount,
+    },
+    item_details: items?.map((i) => ({
+      id: i.id || "1",
+      name: i.title || "Produk",
+      price: i.price || 0,
+      quantity: i.quantity || 1,
+      category: i.category || "General",
+      url: i.url || `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
+    })),
+    customer_details: {
+      first_name: customer?.first_name || "Guest",
+      email: customer?.email || "unknown@example.com",
+      phone: customer?.phone || "",
+    },
+  },
+  {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization:
+        "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+    },
+  }
+);
 
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
