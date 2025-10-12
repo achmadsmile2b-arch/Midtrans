@@ -29,7 +29,7 @@ const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 // 🧠 Tes koneksi server
 // ================================
 app.get("/", (req, res) => {
-  res.send("✅ Midtrans LIVE server aktif dan siap menerima request.");
+  res.send("✅ Midtrans LIVE server aktif dan siap menerima request (Kredivo Ready).");
 });
 
 // ================================
@@ -49,36 +49,40 @@ app.post("/webhook", async (req, res) => {
 
     console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
 
-    // Buat transaksi Midtrans
+    // Buat transaksi Midtrans (semua channel termasuk Kredivo)
     const midtransResponse = await axios.post(
-  "https://app.midtrans.com/snap/v1/transactions",
-  {
-    transaction_details: {
-      order_id: orderId,
-      gross_amount: amount,
-    },
-    item_details: items?.map((i) => ({
-      id: i.id || "1",
-      name: i.title || "Produk",
-      price: i.price || 0,
-      quantity: i.quantity || 1,
-      category: i.category || "General",
-      url: i.url || `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
-    })),
-    customer_details: {
-      first_name: customer?.first_name || "Guest",
-      email: customer?.email || "unknown@example.com",
-      phone: customer?.phone || "",
-    },
-  },
-  {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization:
-        "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
-    },
-  }
-);
+      "https://app.midtrans.com/snap/v1/transactions",
+      {
+        transaction_details: {
+          order_id: orderId,
+          gross_amount: amount,
+        },
+        item_details: order.line_items?.map((i) => ({
+          id: i.id?.toString() || "1",
+          name: i.title || "Produk",
+          price: Math.round(parseFloat(i.price)) || 0,
+          quantity: i.quantity || 1,
+          category: i.product_type || "General",
+          url: `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
+        })),
+        customer_details: {
+          first_name: customer.first_name || "Pelanggan",
+          email: customer.email || "unknown@example.com",
+          phone: customer.phone || "",
+        },
+        credit_card: { secure: true },
+        callbacks: {
+          finish: `${SHOPIFY_STORE_URL}/checkout/thank_you`,
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+        },
+      }
+    );
 
     const redirectUrl = midtransResponse.data.redirect_url;
     console.log("✅ Link pembayaran Midtrans:", redirectUrl);
@@ -135,22 +139,24 @@ app.post("/create-payment", async (req, res) => {
           gross_amount: amount,
         },
         item_details: items?.map((i) => ({
-          id: i.id,
-          price: i.price,
-          quantity: i.quantity,
-          name: i.title,
+          id: i.id || "1",
+          name: i.title || "Produk",
+          price: i.price || 0,
+          quantity: i.quantity || 1,
+          category: i.category || "General",
+          url: i.url || `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
         })),
         customer_details: {
           first_name: customer?.first_name || "Guest",
           email: customer?.email || "unknown@example.com",
+          phone: customer?.phone || "",
         },
       },
       {
         headers: {
           "Content-Type": "application/json",
           Authorization:
-            "Basic " +
-            Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+            "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
         },
       }
     );
@@ -164,7 +170,9 @@ app.post("/create-payment", async (req, res) => {
   }
 });
 
-// Midtrans webhook
+// ================================
+// 📬 Midtrans Webhook → Update status di Shopify
+// ================================
 app.post("/midtrans-webhook", async (req, res) => {
   try {
     const data = req.body;
@@ -179,7 +187,6 @@ app.post("/midtrans-webhook", async (req, res) => {
 
     console.log(`🟢 Status order ${orderId}: ${statusText}`);
 
-    // Cek apakah order berasal dari Shopify (ID numerik)
     if (/^\d+$/.test(orderId)) {
       const updateUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
       await axios.put(
@@ -209,5 +216,5 @@ app.post("/midtrans-webhook", async (req, res) => {
 // ================================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE + Auto Update Status)`);
+  console.log(`🚀 Server berjalan di port ${PORT} (LIVE MODE + Kredivo Ready)`);
 });
