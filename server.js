@@ -11,7 +11,10 @@ const app = express();
 app.use(bodyParser.json());
 app.use(
   cors({
-    origin: "*",
+    origin: [
+      "https://arkebstore.myshopify.com",
+      "https://arkebstore.my.id"
+    ],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
