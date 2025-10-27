@@ -73,8 +73,9 @@ const midtransResponse = await axios.post(
     item_details: sanitizedItems, // <-- Gunakan variabel baru ini
     customer_details: {
       first_name: customer?.first_name || "Guest",
-      email: customer?.email || "unknown@example.com",
-      phone: customer?.phone || "",
+      email: (customer && customer.email) ? customer.email : "unknown@example.com",
+first_name: (customer && customer.first_name) ? customer.first_name : "Guest",
+phone: (customer && customer.phone) ? customer.phone : "",
     },
   },
   {
