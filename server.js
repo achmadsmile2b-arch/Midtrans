@@ -53,21 +53,38 @@ app.post("/webhook", async (req, res) => {
     console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
 
     // Buat transaksi Midtrans (semua channel termasuk Kredivo)
-    const midtransResponse = await axios.post(
-      "https://app.midtrans.com/snap/v1/transactions",
-      {
-        transaction_details: {
-          order_id: orderId,
-          gross_amount: amount,
-        },
-        item_details: order.line_items?.map((i) => ({
-          id: i.id?.toString() || "1",
-          name: i.title || "Produk",
-          price: Math.round(parseFloat(i.price)) || 0,
-          quantity: i.quantity || 1,
-          category: i.product_type || "General",
-          url: `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
-        })),
+    // 🧹 Sanitasi data item agar sesuai format Midtrans
+const sanitizedItems = items?.map((i) => ({
+  id: i.id || "1",
+  name: i.title || "Produk",
+  price: Math.round(parseFloat(i.price)) || 0,  // <-- Tambahan penting
+  quantity: i.quantity || 1,
+  category: i.category || "General",
+  url: i.url || `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
+}));
+
+const midtransResponse = await axios.post(
+  "https://app.midtrans.com/snap/v1/transactions",
+  {
+    transaction_details: {
+      order_id: orderId,
+      gross_amount: amount,
+    },
+    item_details: sanitizedItems, // <-- Gunakan variabel baru ini
+    customer_details: {
+      first_name: customer?.first_name || "Guest",
+      email: customer?.email || "unknown@example.com",
+      phone: customer?.phone || "",
+    },
+  },
+  {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization:
+        "Basic " + Buffer.from(MIDTRANS_SERVER_KEY + ":").toString("base64"),
+    },
+  }
+);
         customer_details: {
           first_name: customer.first_name || "Pelanggan",
           email: customer.email || "unknown@example.com",
