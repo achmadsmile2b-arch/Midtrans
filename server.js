@@ -172,7 +172,7 @@ app.post("/create-payment", async (req, res) => {
     console.log("✅ Redirect URL Midtrans:", redirectUrl);
     res.json({ success: true, redirect_url: redirectUrl });
   } catch (error) {
-    console.error("❌ Gagal buat transaksi langsung:", error.message);
+  console.error("❌ Gagal buat transaksi langsung:", error.response?.data || error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
