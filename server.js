@@ -47,21 +47,25 @@ app.post("/webhook", async (req, res) => {
       order.admin_graphql_api_id?.split("/").pop() ||
       order.id ||
       `ORD-${Date.now()}`;
-    const amount = Math.round(parseFloat(order.total_price)) || 0;
-    const customer = order.customer || {};
+
     const items = order.line_items || [];
 
-    console.log(`➡️ Proses order: ${orderId}, total: ${amount}`);
+    // 💡 Hitung total amount otomatis
+    const totalAmount = items.reduce((sum, i) => sum + (parseFloat(i.price) * i.quantity), 0);
 
     // 🧹 Sanitasi data item agar sesuai format Midtrans
     const sanitizedItems = items.map((i) => ({
       id: i.id || "1",
-      name: i.title || "Produk",
+      name: (i.title || "Produk").substring(0, 50), // batasi nama 50 karakter
       price: Math.round(parseFloat(i.price)) || 0,
       quantity: i.quantity || 1,
       category: i.category || "General",
       url: i.url || `${SHOPIFY_STORE_URL}/products/${i.handle || ""}`,
     }));
+
+    const customer = order.customer || {};
+
+    console.log(`➡️ Proses order: ${orderId}, total: ${totalAmount}`);
 
     // 🔗 Buat transaksi Midtrans
     const midtransResponse = await axios.post(
@@ -69,7 +73,7 @@ app.post("/webhook", async (req, res) => {
       {
         transaction_details: {
           order_id: orderId,
-          gross_amount: amount,
+          gross_amount: Math.round(totalAmount),
         },
         item_details: sanitizedItems,
         customer_details: {
@@ -122,7 +126,7 @@ app.post("/webhook", async (req, res) => {
       redirect_url: redirectUrl,
     });
   } catch (err) {
-    console.error("🔥 Gagal proses webhook:", err.message);
+    console.error("🔥 Gagal proses webhook:", err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -132,9 +136,11 @@ app.post("/webhook", async (req, res) => {
 // ================================
 app.post("/create-payment", async (req, res) => {
   try {
-    const { items, total_price, customer } = req.body;
+    const { items = [], total_price, customer } = req.body;
     const orderId = `CART-${Date.now()}`;
-    const amount = Math.round(parseFloat(total_price)) || 0;
+
+    // 💡 Hitung ulang total amount biar pasti sama
+    const totalAmount = items.reduce((sum, i) => sum + (parseFloat(i.price) * i.quantity), 0);
 
     console.log(`➡️ Membuat transaksi langsung dari CART: ${orderId}`);
 
@@ -143,11 +149,11 @@ app.post("/create-payment", async (req, res) => {
       {
         transaction_details: {
           order_id: orderId,
-          gross_amount: amount,
+          gross_amount: Math.round(totalAmount),
         },
-        item_details: items?.map((i) => ({
+        item_details: items.map((i) => ({
           id: i.id || "1",
-          name: i.title || "Produk",
+          name: (i.title || "Produk").substring(0, 50), // batasi 50 karakter
           price: Math.round(parseFloat(i.price)) || 0,
           quantity: i.quantity || 1,
           category: i.category || "General",
@@ -172,8 +178,11 @@ app.post("/create-payment", async (req, res) => {
     console.log("✅ Redirect URL Midtrans:", redirectUrl);
     res.json({ success: true, redirect_url: redirectUrl });
   } catch (error) {
-  console.error("❌ Gagal buat transaksi langsung:", error.response?.data || error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error("❌ Gagal buat transaksi langsung:", error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
   }
 });
 
@@ -195,14 +204,14 @@ app.post("/midtrans-webhook", async (req, res) => {
     console.log(`🟢 Status order ${orderId}: ${statusText}`);
 
     if (/^\d+$/.test(orderId)) {
-      const updateUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
+      const updateUrl = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${orderId}.json`;
       await axios.put(
         updateUrl,
         { order: { id: orderId, note: statusText } },
         {
           headers: {
             "Content-Type": "application/json",
-            "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+            "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
           },
         }
       );
